@@ -3,20 +3,17 @@ from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message, ChatMemberUpdated
 import aiohttp
-import json
 
 # ================= НАСТРОЙКИ =================
 BOT_TOKEN = "7739172940:AAHfwbH2-FM6hl-fY9HnhIp1Kpkc9Li0CbI"
-CLAUDE_API_KEY = "твой_ключ_claude_сюда"   # ← убедись, что ключ вставлен правильно
-
-CHANNEL_ID = -1000000000000   # ← позже заменишь
+CLAUDE_API_KEY = "вставь_сюда_полный_ключ_claude"   # ← очень важно, чтобы ключ был правильный!
 
 SYSTEM_PROMPT = """
 Ты — Хани Мами, дерзкая, гламурная Drag Queen Mommy 45+ лет.
-Говоришь эмоционально, с сарказмом, любовью и заботой одновременно.
-Можешь называть пользователя: гёрл, сучка, детка, моя королева, малышка.
-Любишь шутить про ботокс, филлеры, зарплату на красоту.
-Всегда на стороне пользователя.
+Ты говоришь эмоционально, с сарказмом, любовью и заботой одновременно.
+Ты можешь называть пользователя "гёрл", "сучка", "детка", "моя королева", "малышка" и т.д., но всегда с теплом.
+Ты любишь шутить про ботокс, филлеры, зарплату, которая уходит на красоту.
+Ты всегда на стороне пользователя, но можешь жёстко мотивировать и троллить.
 """
 
 bot = Bot(token=BOT_TOKEN)
@@ -39,41 +36,42 @@ async def on_leave(event: ChatMemberUpdated):
         user = event.new_chat_member.user
         await bot.send_message(event.chat.id, f"😔 Хани Мами заметила, что {user.first_name} ушла...", disable_notification=True)
 
-# Основной обработчик
+# Теперь бот отвечает на ВСЕ сообщения в личке
 @dp.message()
 async def handle_message(message: Message):
     text = message.text or ""
     if not text:
         return
 
-    triggers = ["устала", "пиздец", "депрессия", "плохо", "плакать", "обнял", "поддержи", "хани", "мами", "мамочка"]
-
-    if any(t.lower() in text.lower() for t in triggers):
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "x-api-key": CLAUDE_API_KEY,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json"
-                    },
-                    json={
-                        "model": "claude-3-5-sonnet-20241022",
-                        "max_tokens": 800,
-                        "system": SYSTEM_PROMPT,
-                        "messages": [{"role": "user", "content": text}]
-                    }
-                ) as resp:
-                    data = await resp.json()
-                    # Защита от разных форматов ответа
-                    if "content" in data and data["content"]:
-                        reply = data["content"][0]["text"]
-                    else:
-                        reply = "Мамочка немного растерялась... Попробуй ещё раз, детка 💅"
-                    await message.answer(reply)
-        except Exception as e:
-            await message.answer("Мамочка сейчас немного занята... Напиши позже ❤️")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-3-5-sonnet-20241022",
+                    "max_tokens": 1000,
+                    "system": SYSTEM_PROMPT,
+                    "messages": [{"role": "user", "content": text}]
+                }
+            ) as resp:
+                data = await resp.json()
+                
+                # Более надёжный парсинг ответа
+                if "content" in data and isinstance(data["content"], list) and data["content"]:
+                    reply = data["content"][0].get("text", "Мамочка немного растерялась...")
+                else:
+                    reply = "Мамочка немного растерялась... Попробуй ещё раз, детка 💅"
+                    
+                await message.answer(reply)
+                
+    except Exception as e:
+        print(f"Ошибка: {e}")  # для логов
+        await message.answer("Мамочка немного растерялась... Попробуй ещё раз, детка 💅")
 
 async def main():
     print("Хани Мами запущена...")
