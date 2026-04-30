@@ -1,5 +1,6 @@
 import asyncio
 import os
+import signal
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message, ChatMemberUpdated
 import aiohttp
@@ -22,26 +23,15 @@ SYSTEM_PROMPT = """
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Приветствие новых и реакция на отписку (оставляем как было)
 @dp.chat_member()
 async def greet_new_member(event: ChatMemberUpdated):
     if event.new_chat_member.status == "member":
-        await bot.send_message(
-            event.chat.id,
-            "Привет, моя хорошая! Это Хани Мами на связи 💅 Мамочка всегда здесь."
-        )
+        await bot.send_message(event.chat.id, "Привет, моя хорошая! Это Хани Мами на связи 💅 Мамочка всегда здесь.")
 
-@dp.chat_member()
-async def on_leave(event: ChatMemberUpdated):
-    if event.new_chat_member.status in ["left", "kicked"]:
-        await bot.send_message(event.chat.id, "Хани Мами заметила, что кто-то ушёл... 😢", disable_notification=True)
-
-# Главный обработчик сообщений
 @dp.message()
 async def handle_message(message: Message):
     if not message.text:
         return
-
     user_text = message.text.strip()
     if not user_text:
         return
@@ -64,8 +54,6 @@ async def handle_message(message: Message):
                 },
                 timeout=60
             ) as resp:
-                
-                # Если Claude вернул ошибку (401, 429, 500 и т.д.)
                 if resp.status != 200:
                     error_text = await resp.text()
                     print(f"❌ Claude API Error {resp.status}: {error_text}")
@@ -73,23 +61,30 @@ async def handle_message(message: Message):
                     return
 
                 data = await resp.json()
-                
-                if "content" in data and data["content"]:
-                    reply = data["content"][0].get("text", "Мамочка немного растерялась...")
-                else:
-                    reply = "Мамочка немного растерялась... Попробуй ещё раз, детка"
-
+                reply = data.get("content", [{}])[0].get("text", "Мамочка немного растерялась...")
                 await message.answer(reply)
 
-    except asyncio.TimeoutError:
-        print("⏰ Timeout при запросе к Claude")
-        await message.answer("Мамочка задумалась слишком глубоко... Попробуй ещё раз.")
     except Exception as e:
-        print(f"🚨 КРИТИЧЕСКАЯ ОШИБКА: {type(e).__name__}: {e}")
+        print(f"🚨 Ошибка: {type(e).__name__}: {e}")
         await message.answer("Что-то пошло не так с мамочкой... Попробуй позже, детка.")
 
+async def shutdown():
+    print("🛑 Получен SIGTERM — graceful shutdown...")
+    await dp.stop_polling()
+    await bot.session.close()
+
 async def main():
+    # === ФИКС ДЛЯ RAILWAY ===
+    print("🧹 Удаляем старые вебхуки и pending updates...")
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     print("🚀 Хани Мами запущена...")
+    
+    # graceful shutdown при SIGTERM (Railway убивает контейнер)
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
