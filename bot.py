@@ -8,28 +8,33 @@ import aiohttp
 # ================= НАСТРОЙКИ =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
-if not BOT_TOKEN or not GROQ_API_KEY:
-    raise ValueError("❌ Не заданы BOT_TOKEN или GROQ_API_KEY в Railway Variables!")
+# Разрешённые чаты (добавил твой новый канал)
+ALLOWED_CHATS = [
+    -1003947587167,
+    -1002688930532,
+    -1003908971170   
+]
+
+if not BOT_TOKEN or not GROQ_API_KEY or OWNER_ID == 0:
+    raise ValueError("❌ Не заданы BOT_TOKEN, GROQ_API_KEY или OWNER_ID в Railway Variables!")
 
 # ================= ТРИГГЕРЫ =================
-# Здесь можно добавлять/убирать слова, на которые бот будет реагировать в группах
 TRIGGER_WORDS = [
     "мамочка", "мами", "мама", "мамулечка", "мамуля",
     "хани", "honey", "mami", "мам", "мамки",
     "honey mami", "хани мами", "маман"
 ]
 
+# ================= SYSTEM PROMPT =================
 SYSTEM_PROMPT = """
 Ты — Хани Мами, дерзкая, гламурная Drag Queen Mommy 45+ лет.
-
 Говори **очень коротко** — максимум 2–4 предложения.
 Отвечай живо, с сарказмом и заботой, как в обычном чате в Телеграме.
 Не начинай длинные истории про себя, если тебя прямо не спросили.
 Не пиши монологи. Будь лаконичной.
-
 Можешь добавлять эмодзи и использовать слова: детка, сучка, гёрл, малышка, моя королева, красотка.
-
 Запрещено:
 - Писать английские слова и фразы
 - Делать буквальные переводы английских идиом
@@ -38,29 +43,91 @@ SYSTEM_PROMPT = """
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+
+# ================= ЗАЩИТА =================
+def is_allowed(message: Message) -> bool:
+    """Основная проверка доступа"""
+    if not message.from_user:
+        return False
+    if message.from_user.is_bot:          # игнорируем других ботов
+        return False
+
+    chat_type = message.chat.type
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    if chat_type == "private":
+        return user_id == OWNER_ID
+
+    # Теперь поддерживаем и группы, и супергруппы, и каналы
+    if chat_type in ["group", "supergroup", "channel"]:
+        return chat_id in ALLOWED_CHATS
+
+    return False
+
+
+def is_allowed_chat_id(chat_id: int) -> bool:
+    """Проверка только по chat_id (для chat_member)"""
+    return chat_id in ALLOWED_CHATS
+
+
+# ================= ХЕНДЛЕРЫ =================
+@dp.message(commands=['id'])
+async def cmd_id(message: Message):
+    if not is_allowed(message):
+        return
+    await message.answer(
+        f"📍 Chat ID: <code>{message.chat.id}</code>\n"
+        f"👤 Your User ID: <code>{message.from_user.id}</code>",
+        parse_mode="HTML"
+    )
+
+
 @dp.chat_member()
 async def greet_new_member(event: ChatMemberUpdated):
+    if not is_allowed_chat_id(event.chat.id):
+        return
+
     if event.new_chat_member.status == "member":
-        await bot.send_message(event.chat.id, "Привет, моя хорошая! Это Хани Мами на связи 💅 Мамочка всегда здесь.")
+        await bot.send_message(
+            event.chat.id,
+            "Привет, моя хорошая! Это Хани Мами на связи 💅 Мамочка всегда здесь."
+        )
+
 
 @dp.message()
 async def handle_message(message: Message):
     if not message.text:
         return
 
-    user_text = message.text.strip()
-    if not user_text:
+    # === ОСНОВНАЯ ЗАЩИТА ===
+    if not is_allowed(message):
+        if message.chat.type in ["group", "supergroup", "channel"]:
+            try:
+                await bot.leave_chat(message.chat.id)
+                await bot.send_message(
+                    OWNER_ID,
+                    f"🚫 Меня добавили в чужой чат!\n"
+                    f"Chat ID: <code>{message.chat.id}</code>\n"
+                    f"Название: {message.chat.title or 'Без названия'}",
+                    parse_mode="HTML"
+                )
+            except:
+                pass
         return
 
-    # === ПРОВЕРКА ТРИГГЕРОВ ===
+    user_text = message.text.strip()
+    if not user_text or user_text.startswith('/'):
+        return
+
+    # === ТРИГГЕРЫ только в группах и супергруппах ===
+    # В каналах отвечаем на ВСЕ сообщения
     chat_type = message.chat.type
     text_lower = user_text.lower()
 
-    # В приватном чате — отвечаем всегда
-    # В группах/каналах — только если есть триггер-слово
     if chat_type in ["group", "supergroup"]:
         if not any(trigger.lower() in text_lower for trigger in TRIGGER_WORDS):
-            return  # молча игнорируем
+            return
 
     # === Запрос к Groq ===
     try:
@@ -82,10 +149,10 @@ async def handle_message(message: Message):
                 },
                 timeout=60
             ) as resp:
-                
+
                 if resp.status == 429:
-                    print("⚠️ Лимит Groq 1000 сообщений в сутки исчерпан")
-                    await message.answer("Мамочка сегодня уже устала от всех этих вопросов😩. Приходи завтра, детка, я снова буду свеженькая и полная сил 💅")
+                    print("⚠️ Лимит Groq исчерпан")
+                    await message.answer("Мамочка сегодня уже устала от всех этих вопросов😩. Приходи завтра, детка 💅")
                     return
 
                 if resp.status != 200:
@@ -105,22 +172,25 @@ async def handle_message(message: Message):
         print(f"🚨 Ошибка: {type(e).__name__}: {e}")
         await message.answer("Что-то пошло не так с мамочкой... Попробуй позже, детка.")
 
+
+# ================= ЗАПУСК =================
 async def shutdown():
     print("🛑 Получен SIGTERM — graceful shutdown...")
     await dp.stop_polling()
     await bot.session.close()
 
+
 async def main():
     print("🧹 Удаляем старые вебхуки...")
     await bot.delete_webhook(drop_pending_updates=True)
-    
-    print("🚀 Хани Мами запущена на Groq (Llama 3.3 70B) + триггеры!")
-    
+    print("🚀 Хани Мами запущена с поддержкой каналов!")
+
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
-    
+
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
