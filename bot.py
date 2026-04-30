@@ -56,7 +56,7 @@ async def handle_message(message: Message):
                     "content-type": "application/json"
                 },
                 json={
-                    "model": "claude-3-5-sonnet-20241022",
+                    "model": "claude-sonnet-4-6",
                     "max_tokens": 1200,
                     "temperature": 0.85,
                     "system": SYSTEM_PROMPT,
