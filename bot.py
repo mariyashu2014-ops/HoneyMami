@@ -3,6 +3,7 @@ import os
 import signal
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message, ChatMemberUpdated
+from aiogram.filters import Command          # ← НОВОЕ
 import aiohttp
 
 # ================= НАСТРОЙКИ =================
@@ -10,11 +11,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
-# Разрешённые чаты (добавил твой новый канал)
+# Разрешённые чаты
 ALLOWED_CHATS = [
     -1003947587167,
     -1002688930532,
-    -1003908971170   
+    -1003908971170   # ← твой новый канал
 ]
 
 if not BOT_TOKEN or not GROQ_API_KEY or OWNER_ID == 0:
@@ -46,10 +47,9 @@ dp = Dispatcher()
 
 # ================= ЗАЩИТА =================
 def is_allowed(message: Message) -> bool:
-    """Основная проверка доступа"""
     if not message.from_user:
         return False
-    if message.from_user.is_bot:          # игнорируем других ботов
+    if message.from_user.is_bot:
         return False
 
     chat_type = message.chat.type
@@ -59,7 +59,6 @@ def is_allowed(message: Message) -> bool:
     if chat_type == "private":
         return user_id == OWNER_ID
 
-    # Теперь поддерживаем и группы, и супергруппы, и каналы
     if chat_type in ["group", "supergroup", "channel"]:
         return chat_id in ALLOWED_CHATS
 
@@ -67,12 +66,11 @@ def is_allowed(message: Message) -> bool:
 
 
 def is_allowed_chat_id(chat_id: int) -> bool:
-    """Проверка только по chat_id (для chat_member)"""
     return chat_id in ALLOWED_CHATS
 
 
 # ================= ХЕНДЛЕРЫ =================
-@dp.message(commands=['id'])
+@dp.message(Command("id"))                    # ← ИСПРАВЛЕНО
 async def cmd_id(message: Message):
     if not is_allowed(message):
         return
@@ -100,7 +98,6 @@ async def handle_message(message: Message):
     if not message.text:
         return
 
-    # === ОСНОВНАЯ ЗАЩИТА ===
     if not is_allowed(message):
         if message.chat.type in ["group", "supergroup", "channel"]:
             try:
@@ -120,8 +117,6 @@ async def handle_message(message: Message):
     if not user_text or user_text.startswith('/'):
         return
 
-    # === ТРИГГЕРЫ только в группах и супергруппах ===
-    # В каналах отвечаем на ВСЕ сообщения
     chat_type = message.chat.type
     text_lower = user_text.lower()
 
@@ -183,7 +178,7 @@ async def shutdown():
 async def main():
     print("🧹 Удаляем старые вебхуки...")
     await bot.delete_webhook(drop_pending_updates=True)
-    print("🚀 Хани Мами запущена с поддержкой каналов!")
+    print("🚀 Хани Мами запущена (aiogram 3.x) + канал добавлен!")
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
