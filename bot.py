@@ -1,12 +1,15 @@
 import asyncio
+import os
 from aiogram import Bot, Dispatcher
-from aiogram.filters import Command
 from aiogram.types import Message, ChatMemberUpdated
 import aiohttp
 
 # ================= НАСТРОЙКИ =================
-BOT_TOKEN = "7739172940:AAHfwbH2-FM6hl-fY9HnhIp1Kpkc9Li0CbI"
-CLAUDE_API_KEY = "вставь_сюда_полный_ключ_claude"   # ← очень важно, чтобы ключ был правильный!
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+
+if not BOT_TOKEN or not CLAUDE_API_KEY:
+    raise ValueError("❌ Не заданы BOT_TOKEN или CLAUDE_API_KEY в Railway Variables!")
 
 SYSTEM_PROMPT = """
 Ты — Хани Мами, дерзкая, гламурная Drag Queen Mommy 45+ лет.
@@ -19,28 +22,28 @@ SYSTEM_PROMPT = """
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Приветствие новых подписчиков
+# Приветствие новых и реакция на отписку (оставляем как было)
 @dp.chat_member()
 async def greet_new_member(event: ChatMemberUpdated):
     if event.new_chat_member.status == "member":
-        user = event.new_chat_member.user
         await bot.send_message(
             event.chat.id,
-            f"✨ Привет, моя хорошая! ❤️\nЭто Хани Мами на связи. Мамочка всегда здесь, если нужно поддержать, потроллить или просто выплакаться."
+            "Привет, моя хорошая! Это Хани Мами на связи 💅 Мамочка всегда здесь."
         )
 
-# Реакция на отписку
 @dp.chat_member()
 async def on_leave(event: ChatMemberUpdated):
     if event.new_chat_member.status in ["left", "kicked"]:
-        user = event.new_chat_member.user
-        await bot.send_message(event.chat.id, f"😔 Хани Мами заметила, что {user.first_name} ушла...", disable_notification=True)
+        await bot.send_message(event.chat.id, "Хани Мами заметила, что кто-то ушёл... 😢", disable_notification=True)
 
-# Теперь бот отвечает на ВСЕ сообщения в личке
+# Главный обработчик сообщений
 @dp.message()
 async def handle_message(message: Message):
-    text = message.text or ""
-    if not text:
+    if not message.text:
+        return
+
+    user_text = message.text.strip()
+    if not user_text:
         return
 
     try:
@@ -54,27 +57,39 @@ async def handle_message(message: Message):
                 },
                 json={
                     "model": "claude-3-5-sonnet-20241022",
-                    "max_tokens": 1000,
+                    "max_tokens": 1200,
+                    "temperature": 0.85,
                     "system": SYSTEM_PROMPT,
-                    "messages": [{"role": "user", "content": text}]
-                }
+                    "messages": [{"role": "user", "content": user_text}]
+                },
+                timeout=60
             ) as resp:
+                
+                # Если Claude вернул ошибку (401, 429, 500 и т.д.)
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    print(f"❌ Claude API Error {resp.status}: {error_text}")
+                    await message.answer("Мамочка сейчас немного занята... Попробуй через минуту, детка 💅")
+                    return
+
                 data = await resp.json()
                 
-                # Более надёжный парсинг ответа
-                if "content" in data and isinstance(data["content"], list) and data["content"]:
+                if "content" in data and data["content"]:
                     reply = data["content"][0].get("text", "Мамочка немного растерялась...")
                 else:
-                    reply = "Мамочка немного растерялась... Попробуй ещё раз, детка 💅"
-                    
+                    reply = "Мамочка немного растерялась... Попробуй ещё раз, детка"
+
                 await message.answer(reply)
-                
+
+    except asyncio.TimeoutError:
+        print("⏰ Timeout при запросе к Claude")
+        await message.answer("Мамочка задумалась слишком глубоко... Попробуй ещё раз.")
     except Exception as e:
-        print(f"Ошибка: {e}")  # для логов
-        await message.answer("Мамочка немного растерялась... Попробуй ещё раз, детка 💅")
+        print(f"🚨 КРИТИЧЕСКАЯ ОШИБКА: {type(e).__name__}: {e}")
+        await message.answer("Что-то пошло не так с мамочкой... Попробуй позже, детка.")
 
 async def main():
-    print("Хани Мами запущена...")
+    print("🚀 Хани Мами запущена...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
