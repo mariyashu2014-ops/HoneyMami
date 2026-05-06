@@ -15,8 +15,8 @@ OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 ALLOWED_CHATS = [
     -1003947587167,
     -1002688930532,
-    -1003908971170,
-    -1003941386374 # ← твой новый канал
+    -1003908971170
+    # ← твой новый канал
 ]
 
 if not BOT_TOKEN or not GROQ_API_KEY or OWNER_ID == 0:
